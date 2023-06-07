@@ -1,3 +1,3 @@
 # ACAL
 
-Repository associated with the manuscript “Activity Coefficient Acquisition through Thermodynamics-Informed Active Learning: A Case-Study of Phase Diagram Construction”.
+Repository associated with the manuscript “Activity coefficient acquisition with thermodynamics-informed active learning for phase diagram construction”.
