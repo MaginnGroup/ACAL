@@ -11,8 +11,11 @@ Sections:
     . Fit NRTL
     . Publication Plots
 
-Last edit: 2022-10-27
+Published: 2022-10-27
 Author: Dinis Abranches
+
+Edited: 2024-11-19
+Editor: Alexander Glotov
 """
 
 # =============================================================================
@@ -116,14 +119,31 @@ for n in range(maxIter):
     # Initialize X_AL_i
     X_AL_1=numpy.array([]).reshape(-1,2)
     X_AL_2=numpy.array([]).reshape(-1,2)
-    # Sort X_AL
+    # Sort X_AL such that the temperature values are decreasing towards the eutectic
     for entry in X_AL:
-        if entry[0]<X_Test[eutectic,0]:
-            # Add to X_AL_2
+        if abs(entry[0]-X_Test[eutectic,0])<=0.01 and abs(entry[1]-min(X_AL[:,1]))<=1:
             X_AL_2=numpy.concatenate((X_AL_2,entry.reshape(-1,2)),axis=0)
-        else:
-            # Add to X_AL_1
             X_AL_1=numpy.concatenate((X_AL_1,entry.reshape(-1,2)),axis=0)
+        elif entry[0]<X_Test[eutectic,0]:
+            if not len(X_AL_2)==0 and entry[0] > X_AL_2[-1,0] and entry[1] >= X_AL_2[-1,1]:
+                X_AL_1=numpy.concatenate((X_AL_1,entry.reshape(-1,2)),axis=0)
+            elif not len(X_AL_2)==0 and entry[0] < X_AL_2[-1,0]:
+                X_AL_1=numpy.concatenate((X_AL_1,X_AL_2[-1,:].reshape(-1,2)),axis=0)
+                X_AL_2 = numpy.delete(X_AL_2,-1,axis=0)
+                X_AL_2=numpy.concatenate((X_AL_2,entry.reshape(-1,2)),axis=0)
+            else:
+                X_AL_2=numpy.concatenate((X_AL_2,entry.reshape(-1,2)),axis=0)
+        elif entry[0]>X_Test[eutectic,0]:
+            if not len(X_AL_1)==0 and entry[0] < X_AL_1[-1,0] and entry[1] >= X_AL_1[-1,1]:
+                X_AL_2=numpy.concatenate((X_AL_2,entry.reshape(-1,2)),axis=0)
+            elif not len(X_AL_1)==0 and entry[0] > X_AL_1[-1,0]:
+                X_AL_2=numpy.concatenate((X_AL_2,X_AL_1[-1,:].reshape(-1,2)),axis=0)
+                X_AL_1 = numpy.delete(X_AL_1,-1,axis=0)
+                X_AL_1=numpy.concatenate((X_AL_1,entry.reshape(-1,2)),axis=0)
+            else:
+                X_AL_1=numpy.concatenate((X_AL_1,entry.reshape(-1,2)),axis=0)
+        else:
+            continue
     # Get minimum and maximum temperature from SLE_ID
     Tmin=X_Test[:,1].min()
     Tmax=X_Test[:,1].max()
@@ -151,15 +171,37 @@ for n in range(maxIter):
     # Store posteriors to decrease computational cost
     model_1=model_1.posterior()
     model_2=model_2.posterior()
-    # Define gamma functions for SLE calculation
-    def F_Gamma_1_GP(x1,T):
-        X=numpy.array([x1,T]).reshape(1,2)
-        pred,__=ml.gpPredict(model_1,X,X_Scaler=X_Scaler,gpConfig=gpConfig)
-        return pred[0,0]
-    def F_Gamma_2_GP(x1,T):
-        X=numpy.array([x1,T]).reshape(1,2)
-        pred,__=ml.gpPredict(model_2,X,X_Scaler=X_Scaler,gpConfig=gpConfig)
-        return pred[0,0]
+    # Define lagging curves
+    curve_1_lagging=len(X_AL_1)==0
+    curve_2_lagging=len(X_AL_2)==0
+    # Define gamma functions for SLE calculation such that both curves have an assigned function
+    if curve_1_lagging:
+        def F_Gamma_1_GP(x1,T):
+            X=numpy.array([1-x1,T]).reshape(1,2)
+            pred,__=ml.gpPredict(model_2,X,X_Scaler=X_Scaler,gpConfig=gpConfig)
+            return pred[0,0]
+        def F_Gamma_2_GP(x1,T):
+            X=numpy.array([x1,T]).reshape(1,2)
+            pred,__=ml.gpPredict(model_2,X,X_Scaler=X_Scaler,gpConfig=gpConfig)
+            return pred[0,0]
+    elif curve_2_lagging:
+        def F_Gamma_1_GP(x1,T):
+            X=numpy.array([x1,T]).reshape(1,2)
+            pred,__=ml.gpPredict(model_1,X,X_Scaler=X_Scaler,gpConfig=gpConfig)
+            return pred[0,0]
+        def F_Gamma_2_GP(x1,T):
+            X=numpy.array([1-x1,T]).reshape(1,2)
+            pred,__=ml.gpPredict(model_1,X,X_Scaler=X_Scaler,gpConfig=gpConfig)
+            return pred[0,0]
+    else:
+        def F_Gamma_1_GP(x1,T):
+            X=numpy.array([x1,T]).reshape(1,2)
+            pred,__=ml.gpPredict(model_1,X,X_Scaler=X_Scaler,gpConfig=gpConfig)
+            return pred[0,0]
+        def F_Gamma_2_GP(x1,T):
+            X=numpy.array([x1,T]).reshape(1,2)
+            pred,__=ml.gpPredict(model_2,X,X_Scaler=X_Scaler,gpConfig=gpConfig)
+            return pred[0,0]
     Fs_gamma_GP=[F_Gamma_1_GP,F_Gamma_2_GP]
     # Compute SLE
     SLE_gp,gamma_gp=thermo.compute_Tx_SLE_Binary(Fs_gamma_GP,
@@ -219,9 +261,6 @@ for n in range(maxIter):
     # Append metric
     MAF=(MAF_1+MAF_2)/2
     MAF_Vector.append(MAF)
-    # Define lagging curves
-    curve_1_lagging=len(X_AL_1)==0
-    curve_2_lagging=len(X_AL_2)==0
     # Check GP_MPE
     lagging=(curve_1_lagging or curve_2_lagging)
     if len(MAF_Vector)>0 and MAF<min_AF and not lagging: break
